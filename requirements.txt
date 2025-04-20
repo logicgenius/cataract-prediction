@@ -1,6 +1,8 @@
+numpy<2
 fastapi
 uvicorn[standard]
 tflite-runtime
 pillow
 jinja2
 python-multipart
+

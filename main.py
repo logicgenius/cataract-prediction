@@ -58,39 +58,66 @@ import tflite_runtime.interpreter as tflite
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
 
-# 載入TFLite模型
+# --------- 載入並初始化 TFLite Interpreter ---------
 interpreter = tflite.Interpreter(model_path="cataract.tflite")
 interpreter.allocate_tensors()
+
 input_details = interpreter.get_input_details()
 output_details = interpreter.get_output_details()
-_, input_h, input_w, _ = input_details[0]['shape']
 
+# 取得模型期望的輸入高、寬與資料型別
+_, input_h, input_w, _ = input_details[0]['shape']
+input_dtype = input_details[0]['dtype']
+
+# 類別對應
+class_mapping = {0: "正常", 1: "不正常", 2: "術後"}
+
+# --------- 首頁路由 ---------
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
+# --------- 預測路由 ---------
 @app.post("/predict")
 async def predict(file: UploadFile = File(...)):
+    # 1. 讀圖並轉 RGB，調整到模型輸入尺寸
     content = await file.read()
-    # 1) 讀圖、轉RGB、resize
     image = Image.open(io.BytesIO(content)).convert("RGB")
     image = image.resize((input_w, input_h))
 
-    # 2) 轉成 float32 array
-    img_array = np.array(image, dtype=np.float32)
+    # 2. 轉成 numpy array
+    arr = np.array(image)
 
-    # 3) **EfficientNetV2 預處理：把 [0,255] 映到 [−1,1]**
-    img_array = (img_array - 127.5) / 127.5
+    # 3. 依模型輸入 dtype 做前處理
+    if input_dtype == np.float32:
+        # EfficientNetV2 預處理：把像素從 [0,255] 映到 [-1,1]
+        arr = arr.astype(np.float32)
+        arr = (arr - 127.5) / 127.5
+    elif input_dtype == np.uint8:
+        # 量化版模型：直接 cast，無 normalization
+        arr = arr.astype(np.uint8)
+    else:
+        # 其他型別：直接 cast
+        arr = arr.astype(input_dtype)
 
-    # 4) 加 batch 維度
-    img_array = np.expand_dims(img_array, axis=0)
+    # 4. 加入 batch 維度
+    input_data = np.expand_dims(arr, axis=0)
 
-    # 5) 推論
-    interpreter.set_tensor(input_details[0]['index'], img_array)
+    # 5. 推論
+    interpreter.set_tensor(input_details[0]['index'], input_data)
     interpreter.invoke()
-    prediction = interpreter.get_tensor(output_details[0]['index'])
+    output_data = interpreter.get_tensor(output_details[0]['index'])[0]
 
-    # 6) 取 argmax
-    predicted_class = int(np.argmax(prediction, axis=1)[0])
-    class_mapping = {0: "正常", 1: "不正常", 2: "術後"}
-    return {"prediction": class_mapping[predicted_class]}
+    # 6. 取 argmax 並回傳
+    pred_idx = int(np.argmax(output_data))
+    result = class_mapping[pred_idx]
+
+    # 7. 回傳預測結果與原始分數 (debug 用)
+    return {
+        "prediction": result,
+        "scores": {
+            "正常": float(output_data[0]),
+            "不正常": float(output_data[1]),
+            "術後": float(output_data[2])
+        }
+    }

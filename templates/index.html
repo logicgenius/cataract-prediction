@@ -6,11 +6,32 @@
 </head>
 <body>
     <h1>白內障影像辨識 (TFLite)</h1>
-    <input type="file" id="fileUpload">
+    <input type="file" id="fileUpload" accept="image/*">
     <button onclick="uploadImage()">辨識影像</button>
+    
+    <!-- 新增一個顯示圖片的地方 -->
+    <div id="imagePreview" style="margin-top: 20px;">
+        <img id="preview" src="" alt="預覽圖片" style="max-width: 300px; display: none;">
+    </div>
+
     <h2 id="result"></h2>
 
     <script>
+        // 當選擇檔案時即時顯示圖片
+        document.getElementById('fileUpload').addEventListener('change', function(event) {
+            const file = event.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const imgElement = document.getElementById('preview');
+                    imgElement.src = e.target.result;
+                    imgElement.style.display = 'block'; // 顯示圖片
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+
+        // 上傳圖片並送到後端辨識
         async function uploadImage() {
             const input = document.getElementById('fileUpload');
             if (input.files.length === 0) {
